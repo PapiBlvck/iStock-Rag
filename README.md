@@ -1,6 +1,6 @@
-# RAG-Powered Farming Knowledge Platform
+# iStock-Rag
 
-A monorepo application providing RAG-powered agricultural insights and farm management.
+Full-Stack RAG LiveStock app - A monorepo application providing RAG-powered agricultural insights and farm management.
 
 ## Project Structure
 
@@ -58,4 +58,3 @@ pnpm build
 ## License
 
 MIT
-
