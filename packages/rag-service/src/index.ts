@@ -2,9 +2,12 @@
  * RAG Service Package
  * This package contains the RAG (Retrieval-Augmented Generation) logic
  * for providing agricultural insights and recommendations using Google Gemini
+ * 
+ * Phase 2: Now includes vector database integration for context-aware responses
  */
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getVectorContext } from './vector';
 
 // Initialize Gemini client
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -53,28 +56,42 @@ export async function queryGeminiMultimodal(
     // For multimodal, use array with text and image parts
     let input: string | Array<{ text: string } | { inlineData: { data: string; mimeType: string } }>;
 
+    // Phase 2: Get vector context for RAG
+    let vectorContext = '';
+    let sources: string[] = [];
+    
+    try {
+      const contextResult = await getVectorContext(textQuery);
+      vectorContext = contextResult.context;
+      sources = contextResult.sources;
+    } catch (error) {
+      console.warn('Vector search failed, continuing without context:', error);
+      // Continue without vector context if search fails
+    }
+
     if (imageBase64) {
       // Multimodal: array of parts
       const imagePart = fileToGenerativePart(imageBase64, 'image/jpeg');
-      input = [
+      const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [
         { text: textQuery },
         imagePart,
       ];
 
-      // TODO: Add RAG context from vector database
-      // const context = await getVectorContext(textQuery);
-      // if (context) {
-      //   input.push({ text: `\n\nContext from knowledge base:\n${context}` });
-      // }
+      // Add RAG context if available
+      if (vectorContext) {
+        parts.push({ text: `\n\n${vectorContext}` });
+      }
+      
+      input = parts;
     } else {
-      // Text-only: use string directly (simpler and more efficient)
-      input = textQuery;
-
-      // TODO: Add RAG context from vector database
-      // const context = await getVectorContext(textQuery);
-      // if (context) {
-      //   input = `${input}\n\nContext from knowledge base:\n${context}`;
-      // }
+      // Text-only: build prompt with context
+      let prompt = textQuery;
+      
+      if (vectorContext) {
+        prompt = `${textQuery}\n\n${vectorContext}`;
+      }
+      
+      input = prompt;
     }
 
     const result = await model.generateContent(input);
@@ -82,12 +99,16 @@ export async function queryGeminiMultimodal(
     const response = result.response;
     const answer = response.text();
 
-    // TODO: Implement confidence scoring based on vector search results
-    // For now, return a default confidence if we have a response
-    const confidence = answer.length > 0 ? 0.8 : 0;
-
-    // TODO: Extract sources from vector search results
-    // const sources = vectorResults.map(r => r.source);
+    // Phase 2: Confidence scoring based on vector search results
+    // Higher confidence if we have relevant context from vector search
+    let confidence = 0.8;
+    if (sources.length > 0) {
+      // Boost confidence if we have sources from vector search
+      confidence = 0.9;
+    } else if (answer.length < 50) {
+      // Lower confidence for very short answers
+      confidence = 0.6;
+    }
 
     // If the answer is too short or seems like an error, return null (low confidence)
     if (answer.length < 10) {
@@ -97,7 +118,7 @@ export async function queryGeminiMultimodal(
     return {
       answer,
       confidence,
-      // sources: sources.length > 0 ? sources : undefined,
+      sources: sources.length > 0 ? sources : undefined,
     };
   } catch (error) {
     console.error('Error querying Gemini:', error);
@@ -110,7 +131,11 @@ export async function queryGeminiMultimodal(
  */
 export const RAGService = {
   initialize: () => {
-    console.log('RAG Service initialized');
+    console.log('RAG Service initialized with vector database support');
   },
   query: queryGeminiMultimodal,
 };
+
+// Export vector functions for seeding scripts
+export { vectorSearch, upsertDocuments, generateEmbedding } from './vector';
+export type { VectorSearchResult } from './vector';
