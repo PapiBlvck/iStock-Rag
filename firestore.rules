@@ -1,0 +1,107 @@
+rules_version = '2';
+
+// Helper function to ensure the user is authenticated
+service cloud.firestore {
+match /databases/{database}/documents {
+
+// --- Core Security Checks ---
+// Ensure the user is logged in
+function isAuthenticated() {
+  return request.auth != null;
+}
+
+// Ensure the requested document ID matches the authenticated user's ID
+function isOwner(userId) {
+  return isAuthenticated() && request.auth.uid == userId;
+}
+
+// --- Data Validation Functions ---
+// Checks if the FarmProfile data is valid (based on our TUser and TFarmProfile schemas)
+function isValidFarmProfile(data) {
+  return data.farmName is string
+      && data.mainLivestockType is string
+      && data.headCount is number
+      && data.userId == request.auth.uid; // Critical: Ensure the userId matches the authenticated user
+}
+
+// --- 1. User Collection Rules ---
+// Path: /artifacts/{appId}/users/{userId}
+match /artifacts/{appId}/users/{userId} {
+  allow read, create, update: if isOwner(userId);
+  
+  // Additional check on creation to ensure the user is writing to their own document
+  allow create: if isOwner(userId) 
+                && request.resource.data.email == request.auth.token.email
+                && request.resource.data.uid == userId;
+}
+
+// --- 2. FarmProfile Collection Rules ---
+// Path: /artifacts/{appId}/users/{userId}/farmProfiles/{farmProfileId}
+// Note: We are nesting the FarmProfile under the user's private path for strong ownership.
+// The userId here is the parent user's ID.
+match /artifacts/{appId}/users/{userId}/farmProfiles/{farmProfileId} {
+
+  // User can create, read, and update their own farm profile
+  allow read, update: if isOwner(userId);
+  
+  // On create, ensure the user is the owner AND the data matches the schema requirements
+  allow create: if isOwner(userId) 
+                && isValidFarmProfile(request.resource.data);
+
+  // Deny deletion unless an Admin feature is implemented later
+  allow delete: if false; 
+}
+
+// --- 3. Ingredients Collection Rules ---
+// Path: /ingredients/{ingredientId}
+// Users can create, read, update, and delete their own ingredients
+match /ingredients/{ingredientId} {
+  // Allow read if the ingredient belongs to the user
+  allow read: if isAuthenticated() 
+              && resource.data.userId == request.auth.uid;
+  
+  // Allow create if the user is creating their own ingredient
+  allow create: if isAuthenticated() 
+                && request.resource.data.userId == request.auth.uid;
+  
+  // Allow update if the user owns the ingredient
+  allow update: if isAuthenticated() 
+                && resource.data.userId == request.auth.uid
+                && request.resource.data.userId == request.auth.uid;
+  
+  // Allow delete if the user owns the ingredient
+  allow delete: if isAuthenticated() 
+                && resource.data.userId == request.auth.uid;
+}
+
+// --- 4. Feed Rations Collection Rules ---
+// Path: /feedRations/{rationId}
+// Users can create, read, update, and delete their own feed rations
+match /feedRations/{rationId} {
+  // Allow read if the ration belongs to the user
+  allow read: if isAuthenticated() 
+              && resource.data.userId == request.auth.uid;
+  
+  // Allow create if the user is creating their own ration
+  allow create: if isAuthenticated() 
+                && request.resource.data.userId == request.auth.uid;
+  
+  // Allow update if the user owns the ration
+  allow update: if isAuthenticated() 
+                && resource.data.userId == request.auth.uid
+                && request.resource.data.userId == request.auth.uid;
+  
+  // Allow delete if the user owns the ration
+  allow delete: if isAuthenticated() 
+                && resource.data.userId == request.auth.uid;
+}
+
+// --- 5. Deny all other unauthenticated access by default ---
+// This catches any collections or paths not explicitly covered above
+match /{document=**} {
+  allow read, write: if false;
+}
+
+
+}
+}
